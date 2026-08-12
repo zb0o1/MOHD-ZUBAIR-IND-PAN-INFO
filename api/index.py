@@ -5,17 +5,19 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-UPSTREAM_URL = os.getenv("UPSTREAM_URL", "").strip()
-UPSTREAM_BEARER_TOKEN = os.getenv("UPSTREAM_BEARER_TOKEN", "").strip()
+# ==================== CONFIG ====================
+
+BASE_URL = os.getenv("UPSTREAM_URL", "").strip()
+BEARER_TOKEN = os.getenv("UPSTREAM_BEARER_TOKEN", "").strip()
 
 DEVELOPER = "MOHD ZUBAIR"
 TELEGRAM = "https://t.me/ZB15y"
 WHATSAPP = "https://wa.me/+584167861851"
 
-PAN_RE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
+PAN_PATTERN = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
 
 
-def footer():
+def developer_info():
     return {
         "developer": DEVELOPER,
         "telegram": TELEGRAM,
@@ -26,79 +28,82 @@ def footer():
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
-        "api": "MOHD ZUBAIR PAN API",
+        "api": "PAN to Info API",
         "status": "online",
-        "usage": "/api/pan?info=ABCDE1234F",
-        **footer()
+        "usage": "/pan-info?pan=JCZPS4827P",
+        "example": "/pan-info?pan=JCZPS4827P",
+        **developer_info()
     })
 
 
-@app.route("/api/pan", methods=["GET"])
-def pan():
+@app.route("/pan-info", methods=["GET"])
+def pan_info():
 
-    value = request.args.get("info", "").strip().upper()
+    pan = request.args.get("pan", "").strip().upper()
 
-    if not PAN_RE.fullmatch(value):
+    if not PAN_PATTERN.fullmatch(pan):
         return jsonify({
-            "error": "Valid 10-character PAN format required",
-            "usage": "/api/pan?info=ABCDE1234F",
-            **footer()
+            "error": "Valid 10-digit PAN required",
+            "example": "/pan-info?pan=JCZPS4827P",
+            **developer_info()
         }), 400
 
-    if not UPSTREAM_URL:
+    if not BASE_URL:
         return jsonify({
             "error": "UPSTREAM_URL is not configured",
-            **footer()
+            **developer_info()
         }), 500
 
-    if not UPSTREAM_BEARER_TOKEN:
+    if not BEARER_TOKEN:
         return jsonify({
             "error": "UPSTREAM_BEARER_TOKEN is not configured",
-            **footer()
+            **developer_info()
         }), 500
 
+    # Use only headers documented/authorized by the upstream API.
     headers = {
-        "Authorization": f"Bearer {UPSTREAM_BEARER_TOKEN}",
+        "Authorization": f"Bearer {BEARER_TOKEN}",
         "Accept": "application/json"
     }
 
     try:
         response = requests.get(
-            UPSTREAM_URL,
-            params={"pan": value},
+            BASE_URL,
+            params={"pan": pan},
             headers=headers,
             timeout=15
         )
 
         try:
-            result = response.json()
+            data = response.json()
         except ValueError:
-            result = {
-                "upstream_status": response.status_code,
-                "upstream_response": response.text[:2000]
+            data = {
+                "error": "Upstream returned a non-JSON response",
+                "status_code": response.status_code,
+                "raw_response": response.text[:1000]
             }
 
-        if isinstance(result, dict):
-            result.update(footer())
+        if isinstance(data, dict):
+            data.update(developer_info())
         else:
-            result = {
-                "data": result,
-                **footer()
+            data = {
+                "data": data,
+                **developer_info()
             }
 
-        return jsonify(result), response.status_code
+        return jsonify(data), response.status_code
 
     except requests.Timeout:
         return jsonify({
             "error": "Upstream request timed out",
-            **footer()
+            **developer_info()
         }), 504
 
     except requests.RequestException as exc:
         return jsonify({
             "error": "Upstream request failed",
             "details": str(exc),
-            **footer()
+            **developer_info()
         }), 502
 
 
